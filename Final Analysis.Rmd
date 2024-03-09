@@ -1,0 +1,620 @@
+---
+title: "NYC Flight Analysis"
+author: "Cherian, Husain, Ashish, Kevin"
+date: "2022-12-03"
+output: html_document
+---
+
+##Ideally to reduce delays one must also factor in the number of flights as greater the number of flights at an airport there would be more delays. Thus, to reduce delays we can try to reduce the overall number flights flying per day by providing a larger seating capacity for more frequented destinations in a day. This may reduce the number of travelling options for passengers but it would also decrease the strain on each airport as well thus, inture reducing the overall delays.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "C:/Users/Kevin Paul/OneDrive - University of Bath/Lectures/MN50749 - DB and BI/CW - BI/R stuff/")
+```
+
+
+
+```{r}
+#errors - 278
+
+library(dplyr)
+library(ggplot2)
+library(corrplot)
+library(writexl)
+library(tidyverse)
+library(ggpubr)
+setwd("C:/Users/Kevin Paul/OneDrive - University of Bath/Lectures/MN50749 - DB and BI/CW - BI/R stuff/")
+
+airlines <- read.csv("airlines.csv")
+flights <-read.csv("flights.csv")
+weather <- read.csv("weather.csv")
+planes <- read.csv("planes.csv")
+airports <-read.csv("airports.csv")
+```
+
+#structure of report
+#1.data overview 2.data exploration 3. insights 4. business summary 5.addiitonal pointers
+
+
+#Cherian
+
+
+
+```{r echo=FALSE}
+flight_summary <- flights %>%
+  group_by(carrier) %>%
+  summarize(Number_of_flights = n(),
+            Average_flights_per_day = round(n()/365,digits = 2))
+
+ggplot(flight_summary) +
+  geom_col(
+    aes(
+      y = reorder(carrier,Average_flights_per_day),
+      x = Average_flights_per_day),
+    fill = "lightblue", 
+    width = 0.5) +
+  theme_bw(base_line_size = 0) +
+  labs(y = NULL)
+```
+This graph was just created to see which carrier is running most number of flights in a year
+
+#Analyzing the Airports data
+
+Splitting the timezone to identify international and domestic flights
+not useful as all the flights are domestic if we look at majority of the data. The few international cases are also in USA just the timezone identified says it is in Asia.
+
+```{r echo=FALSE}
+airports[c('Country','City')] <- str_split_fixed(airports$tzone, "/", 2)
+distinct(airports, Country)
+
+airports[c('Dom/Int')] <- ifelse(airports$Country == "America", "Domestic",
+                         ifelse(airports$Country == "Pacific", "Domestic","International"))
+
+```
+
+```{r}
+#Splitting data into early and delayed departures
+flights$dep_status <- ifelse(flights$dep_delay <0,"Early",
+                         ifelse(flights$dep_delay > 0 ,"Delayed","On-Time"))
+flight_summary <- flights %>%
+  group_by(origin, dep_status) %>%
+  summarize(Number_of_flights = n())
+
+#segregating the number of flights delayed, early and on-time across the three airports
+
+ggplot(flight_summary, color = dep_status) +
+  geom_col(
+    aes(
+      y = dep_status,
+      x = Number_of_flights,
+      fill = dep_status),
+    width = 0.5) +
+  #facet_wrap(~origin, nrow = 3)
+  theme_bw(base_line_size = 0) +
+  labs(y = NULL)
+
+#Visualizing the data using a Line chart
+
+flight_summary <- flights %>%
+  group_by(origin, dep_status, month) %>%
+  filter(dep_status=='Delayed') %>%
+  summarise(Number_of_flights = n())
+
+#
+ggplot(flight_summary, color = origin) +
+  geom_line(
+    aes(
+      y = Number_of_flights,
+      x = month,
+      color = origin)) +
+  facet_wrap(~dep_status, nrow = 3) +
+  scale_x_continuous(breaks=seq(1,12,by=1)) +
+  theme_bw(base_line_size = 0) +
+  labs(y = NULL)
+
+#
+flights$week <- strftime(flights$time_hour, format = "%V")
+
+dummy <- flights %>%
+  group_by(month) %>%
+  summarise(Number_of_flights = n())
+
+ggplot(dummy , aes(month, Number_of_flights)) +
+  geom_line()+
+  scale_x_continuous(breaks=seq(1,12,by=2)) +
+  theme_bw()
+  
+plot(dummy$month, dummy$Number_of_flights) 
+
+
+```
+
+
+```{r echo=FALSE}
+#list of airlines
+#16 distinct airlines 
+#no duplicates in the data
+
+dummy_airports <- flights %>%
+  group_by(origin, month) %>%
+  summarize(Number_of_days = n_distinct(day),
+            Number_of_flights = n(),
+            Average_flights_per_day = round(n()/Number_of_days,digits = 2),
+            Sum_of_delay = sum(dep_delay))
+
+ggplot(dummy_airports, aes(month,Number_of_flights, color = origin)) +
+         geom_line()+
+         scale_x_continuous(breaks=seq(1,12,by=1))
+         theme_bw()
+```
+
+#Analyzing planes dataset
+
+```{r echo=FALSE}
+distinct(planes, engine)
+distinct(planes, manufacturer)
+distinct(planes, type)
+n_distinct(planes$tailnum)
+n_distinct(flights$tailnum)
+
+planes$seating_bucket <- ifelse(planes$seats <= 10, "2-10", 
+                         ifelse((planes$seats > 10 & planes$seats <= 30), "11-30",
+                         ifelse((planes$seats > 30 & planes$seats <= 100), "31 - 100",
+                         ifelse((planes$seats > 100 & planes$seats <= 200), "101 - 200",
+                         ifelse((planes$seats > 200 & planes$seats <= 300), "201 - 300",">300")))))
+
+flights <- merge(flights,planes, by="tailnum", all.x = TRUE)
+
+#removing the NAN values
+flights2 <- flights[complete.cases(flights[,c("seats")]),]
+
+```
+
+##frequency graph and Scatter plot
+```{r echo=FALSE}
+ggplot(flights, aes(seats, color = origin)) +
+  geom_freqpoly(binwidth = 10) +
+  facet_wrap(~origin, nrow = 3)
+  theme_bw()
+
+ggplot(flights, aes(dep_delay,seats, color = origin)) +
+  geom_jitter() +
+  theme_bw()
+
+ggplot(flights, aes(dep_delay,seats, color = origin)) +
+  geom_violin(scale = "area") +
+  facet_wrap(~origin, nrow = 1) +
+  theme_bw()
+
+```
+##Validating how many flights travelling to certain location
+```{r echo = FALSE}
+
+flights_Dest_Summary <- flights %>%
+  group_by(year.x, month, day, origin, dest, seats) %>%
+  summarize(Number_of_flights = n(),
+            dest_count = n_distinct(dest)) %>%
+  arrange(month,day,desc(Number_of_flights)) %>%
+  filter (seats < 100)
+
+flights_Dest_Summary$UID <- paste(flights_Dest_Summary$month,'/',flights_Dest_Summary$day)
+
+flights_Dest_Summary <- Reduce(rbind,
+                              by(flights_Dest_Summary,             flights_Dest_Summary[c("UID")],head,n = 3))
+
+flights_Dest_Summary2 <- flights_Dest_Summary %>%
+  group_by(dest) %>%
+  summarize(dest_sum = sum(dest_count))
+
+flights_Dest_Summary2
+
+flights_Dest_Summary2 %>%
+  arrange(dest_sum) %>%
+  #mutate(fill_col = seq_along(dest_sum)) %>%
+  ggplot(aes(y = reorder(dest, dest_sum),x = dest_sum,fill = dest_sum)) +
+  geom_col( position = position_stack()) +
+  scale_fill_viridis_c(option = "inferno", direction = -1, begin = 0.2) 
+```
+Based on above analysis we have identified that the dest BOS and CVG has appeared in the top 3 destinations in the entire year where it has a seating capacity less than 100. The top 3 destinations was calculated by estimating the top 3 destinations that are travelled each day. A distinct calculation of the number of times the destination appeared in the top 3  across the entire year was calculated to incorporate into the chart
+
+Ideally to reduce delays one must also factor in the number of flights as more the number of flights at an airport there would be more delays. THus, to reduce delays we can try to reduce the overall number flights flying per day by providing a larger seating capacity for more frequented destinations in a day. This may reduce the number of travelling options for passengers but it would also decrease the strain on each airport as well thus, inture reducing the overall delays.
+
+
+#Analyzing flights delayed at an hourly situation
+
+```{r echo=FALSE}
+
+flights_Hourly_Summary <- flights %>%
+  group_by(dep_time, origin) %>%
+  summarize(Number_of_flights = n(),
+            Average_dep_delay = mean(dep_delay))
+
+#write_xlsx(flights_Hourly_Summary,'C:\\Users\\cheri\\OneDrive - University of Bath\\Course\\Semester 1\\MN50749\\CourseWork\\Dataset\\Extracted Outputs\\Summary.xlsx')
+
+flights_Hourly_Summary %>%
+  ggplot(aes(x = dep_time, y = Average_dep_delay, color = origin)) +
+  geom_line() +
+  scale_x_continuous(breaks=seq(0,2359,by=200)) +
+  facet_wrap(~origin, nrow=3) +
+  theme_bw()
+
+flights_Hourly_Summary %>%
+  ggplot(aes(x = dep_time, y = Number_of_flights, color = origin)) +
+  geom_line() +
+  scale_x_continuous(breaks=seq(0,2359,by=200)) +
+  theme_bw()
+
+```
+
+#Analyzing flights delayed at an hourly situation across 12 months
+
+```{r echo=FALSE}
+
+flights_Hourly_Summary <- flights %>%
+  group_by(month, dep_time, origin) %>%
+  summarize(Number_of_flights = n(),
+            Average_dep_delay = mean(dep_delay))
+
+#write_xlsx(flights_Hourly_Summary,'C:\\Users\\cheri\\OneDrive - University of Bath\\Course\\Semester 1\\MN50749\\CourseWork\\Dataset\\Extracted Outputs\\Summary.xlsx')
+
+flights_Hourly_Summary %>%
+  ggplot(aes(x = dep_time, y = Average_dep_delay, color = origin)) +
+  geom_line() +
+  facet_wrap(~month, nrow = 6) +
+  scale_x_continuous(breaks=seq(0,2359,by=200)) +
+  theme_bw()
+
+flights_Hourly_Summary %>%
+  ggplot(aes(x = dep_time, y = Number_of_flights, color = origin)) +
+  geom_line() +
+  scale_x_continuous(breaks=seq(0,2359,by=200)) +
+  theme_bw()
+
+```
+
+#Analysis of Seating Capacity
+
+ Merging the seating information with flights data for further analysis.
+```{r echo=FALSE}
+flights <- merge(flights,planes, by="tailnum", all.x = TRUE)
+
+#removing the NAN values
+######flights2 <- flights[complete.cases(flights[,c("seats")]),]
+```
+
+##Validating how many flights travelling to certain location
+
+DSSD
+
+flights_Dest_Summary$UID <- paste(flights_Dest_Summary$month,'/',flights_Dest_Summary$day)
+
+flights_Dest_Summary <- Reduce(rbind,
+                              by(flights_Dest_Summary,             flights_Dest_Summary[c("UID")],head,n = 3))
+
+flights_Dest_Summary2 <- flights_Dest_Summary %>%
+  group_by(dest) %>%
+  summarize(dest_sum = sum(dest_count))
+
+flights_Dest_Summary2
+
+flights_Dest_Summary2 %>%
+  arrange(dest_sum) %>%
+  #mutate(fill_col = seq_along(dest_sum)) %>%
+  ggplot(aes(y = reorder(dest, dest_sum),x = dest_sum,fill = dest_sum)) +
+  geom_col( position = position_stack()) +
+  scale_fill_viridis_c(option = "inferno", direction = -1, begin = 0.2) 
+#+
+ # theme_bw(base_line_size = 0) +
+  #labs(y = NULL)
+```
+Based on above analysis we have identified that the dest BOS and CVG has appeared in the top 3 destinations in the entire year where it has a seating capacity less than 100. The top 3 destinations was calculated by estimating the top 3 destinations that are travelled each day. A distinct calculation of the number of times the destination appeared in the top 3  across the entire year was calculated to incorporate into the chart
+
+Ideally to reduce delays one must also factor in the number of flights as more the number of flights at an airport there would be more delays. THus, to reduce delays we can try to reduce the overall number flights flying per day by providing a larger seating capacity for more frequented destinations in a day. This may reduce the number of travelling options for passengers but it would also decrease the strain on each airport as well thus, inture reducing the overall delays.
+
+
+#Ashish
+
+```{r echo=FALSE}
+flights_times <- mutate(flights,
+                        dep_time_mins = (dep_time %/% 100 * 60 + dep_time %% 100) %% 1440,
+                        sched_dep_time_mins = (sched_dep_time %/% 100 * 60 +
+                                                 sched_dep_time %% 100) %% 1440)
+str(flights_times)
+head(flights_times)
+select(
+  flights_times, dep_time, dep_time_mins, sched_dep_time,
+  sched_dep_time_mins)
+
+time2mins <- function(x) {
+  (x %/% 100 * 60 + x %% 100) %% 1440
+}
+flights_times <- mutate(flights,
+                        dep_time_mins = time2mins(dep_time),
+                        sched_dep_time_mins = time2mins(sched_dep_time)
+)
+select(
+  flights_times, dep_time, dep_time_mins, sched_dep_time,
+  sched_dep_time_mins
+)
+
+#Checking the difference between arrival and departure delays
+flights_airtime <-
+  mutate(flights,
+         dep_time = (dep_time %/% 100 * 60 + dep_time %% 100) %% 1440,
+         arr_time = (arr_time %/% 100 * 60 + arr_time %% 100) %% 1440,
+         air_time_diff = air_time - (arr_time + dep_time)
+  )
+nrow(filter(flights_airtime, air_time_diff != 0))
+
+#Plotting the air time difference
+ggplot(flights_airtime, aes(x = air_time_diff)) +
+  geom_histogram(binwidth = 1)
+flights_airtime
+
+summary(flights_airtime$air_time_diff)
+
+#Checking if Departure delay is equal to dep_time - sched_dep_time
+flights_deptime <-
+  mutate(flights,
+         dep_time_min = (dep_time %/% 100 * 60 + dep_time %% 100) %% 1440,
+         sched_dep_time_min = (sched_dep_time %/% 100 * 60 +
+                                 sched_dep_time %% 100) %% 1440,
+         dep_delay_diff = dep_delay - dep_time_min + sched_dep_time_min
+  )
+
+#Plotting and checking if the delays are exactly equal to 24 hours proving that it's 
+#because of the delays happening at midnight
+ggplot(
+  filter(flights_deptime, dep_delay_diff > 0),
+  aes(y = sched_dep_time_min, x = dep_delay_diff)
+) +
+  geom_point()
+
+# 10 most delayed flights
+flights_delayed3 <- top_n(flights, 10, dep_delay)
+flights_delayed3 <- arrange(flights_delayed3, desc(dep_delay))
+select(flights_delayed3, month, day, carrier, flight, dep_delay)
+
+```
+
+
+#Kev & Husain
+
+
+```{r echo=FALSE}
+#adding seasons column to the weather.csv file. 
+weather <- weather %>%
+  mutate(season = ifelse(month %in% 9:11, "Fall",
+                         ifelse(month %in% 6:8, "Summer",
+                                ifelse(month %in% 3:5, "Spring", "Winter"))))
+
+#includes all flight details
+flights_all_flight <- flights %>%
+  select(carrier,origin,hour,month,hour,day,dep_delay,time_hour)
+flights_all_flight
+
+#includes details of all flights that had departure delay.
+flights_delayed_flight <- flights %>%
+  filter(dep_delay > 0) %>%
+  select(carrier,origin,month,hour,day,dep_delay,time_hour)
+flights_delayed_flight
+
+#flights with plane information
+flight_planes <- left_join(flights,planes,by='tailnum')
+flight_planes
+
+#all flight details with weather details
+flight_with_weather <- inner_join(flights_all_flight,weather,by=c('time_hour'='time_hour','origin'='origin','hour'='hour','day'='day'))
+flight_with_weather
+
+#all delayed flights with weather details
+flight_with_weather_delayed <- inner_join(flights_delayed_flight,weather,by =c('time_hour'='time_hour','origin'='origin','hour'='hour','day'='day'))
+flight_with_weather_delayed
+```
+
+```{r echo=FALSE}
+# Number of flights by each airline ---------------------------------------
+
+graph6<-flight_with_weather %>%
+  group_by(carrier,season) %>%
+  summarise(count=n())%>%
+  ggplot(aes(x=reorder(carrier,-count),y=count,fill=season))+geom_bar(color='grey',stat = "identity")+
+  #geom_text(aes(label=count),nudge_y = 1000)+
+  ylab("Number of Flights")+xlab("Carrier")+
+  ggtitle("Total number of flights by each airline")
+
+
+
+# Avg delay of carriers ---------------------------------------------------
+
+graph7<-flight_with_weather_delayed %>%
+  group_by(carrier,season) %>%
+  summarise(avg_dep_delay=mean(dep_delay,na.rm=TRUE),count=n()) %>%
+  ggplot(aes(x=reorder(carrier,-count),y=avg_dep_delay,fill=season))+geom_bar(color='grey',stat = "identity")+
+  #geom_text(aes(label=as.integer(avg_dep_delay)),nudge_y = 1)+
+  ylab("Avg Dep Delay")+xlab("Carrier")+
+  ggtitle("Average Delay by each airline")
+  
+ggarrange(graph1,graph2,labels=c('A','B'),ncol=2,nrow=1)
+```
+
+```{r echo=FALSE}
+#Seasonal trend of average departure delay vs hours of the day
+
+flight_with_weather_delayed %>%
+  group_by(hour,season) %>%
+  summarise(average_dep_delay = mean(dep_delay,na.rm=TRUE)) %>%
+  ggplot(aes(x=hour, y=average_dep_delay,group=season,color=season)) + 
+  scale_x_continuous(breaks=seq(5,29,2))+
+  geom_hline(yintercept = avg_dep_delay,color='yellow',lwd=2,lty=4) + 
+  geom_line(lwd=2)+xlab("Hour")+ylab("Average Departure Delay")+
+  ggtitle("Seasonal trend of avg departure delay by Hour")
+
+
+#seasonal trend of total flights by the hour
+
+graph12 <- flight_with_weather %>%
+  ggplot(aes(hour.x,color=season))+xlab("Hour")+
+  geom_freqpoly(binwidth=1,lwd=3)+
+  ggtitle("Seasonal trend of number of total flights by hour")
+
+#seasonal trend of number of flights delayed by the hour
+
+graph13 <- flight_with_weather_delayed %>%
+  ggplot(aes(hour,color=season))+
+  geom_freqpoly(binwidth=1,lwd=3)+
+  ggtitle(("Seasonal trend of number of flights delayed by the hour"))
+
+ggarrange(graph12,graph13,labels=c('A','B'),ncol=2,nrow=1)
+
+
+```
+
+```{r echo=FALSE}
+#corelation plot to see the corelation among the weather variables like dewp,temp,humidity,windspeed etc.
+flight_with_weather_cor_plot <- 
+  flight_with_weather_delayed %>%
+  select(dep_delay,precip,visib,dewp,wind_speed,temp,humid,wind_dir,pressure)%>%
+  na.omit()
+corrplot(cor(flight_with_weather_cor_plot),method="color")
+```
+
+```{r echo=FALSE}
+# All weather metrics - delay comparison  --------------------------------------------------
+
+# precipitation -----------------------------------------------------------
+
+precip_total <- flight_with_weather %>%
+  group_by(precip) %>%
+  summarise(total_count=n())
+
+precip_delay <- flight_with_weather_delayed %>%
+  filter(dep_delay>0)%>%
+  group_by(precip) %>%
+  summarise(delay_count=n())
+
+flight_summary <- left_join(precip_delay,precip_total,by='precip') %>%
+  mutate(delay_percent=100*delay_count/total_count)
+
+graph1<-flight_summary %>%
+  ggplot(aes(x=precip,y=delay_percent))+geom_smooth()+ggtitle("Average delay vs precipitation with density plot")+ylab("delay percent")
+graph1
+#which metric of weather could possibly be affecting weather more? 
+# calculate %of delay for a specific metric
+
+
+
+# visib -------------------------------------------------------------------
+
+visib_total <- flight_with_weather %>%
+  group_by(visib) %>%
+  summarise(total_count=n())
+
+visib_delay <- flight_with_weather_delayed %>%
+  filter(dep_delay>0)%>%
+  group_by(visib) %>%
+  summarise(delay_count=n())
+
+flight_summary <- left_join(visib_delay,visib_total,by='visib') %>%
+  mutate(visib_percent=100*delay_count/total_count)
+
+graph2 <- flight_summary %>%
+  ggplot(aes(x=visib,y=visib_percent))+geom_smooth()+ggtitle("Average delay vs visibility with density plot")+ylab("delay percent")
+graph2
+
+# dewp --------------------------------------------------------------------
+
+dewp_total <- flight_with_weather %>%
+  group_by(dewp) %>%
+  summarise(total_count=n())
+
+dewp_delay <- flight_with_weather_delayed %>%
+  filter(dep_delay>0)%>%
+  group_by(dewp) %>%
+  summarise(delay_count=n())
+
+flight_summary <- left_join(dewp_delay,dewp_total,by='dewp') %>%
+  mutate(delay_percent=100*delay_count/total_count)
+
+graph3 <- flight_summary %>%
+  ggplot(aes(x=dewp,y=delay_percent))+geom_smooth()+ggtitle("Average delay vs dewp with density plot")+ylab("delay percent")
+graph3
+
+# temp --------------------------------------------------------------------
+
+temp_total <- flight_with_weather %>%
+  group_by(temp) %>%
+  summarise(total_count=n())
+
+temp_delay <- flight_with_weather_delayed %>%
+  filter(dep_delay>0)%>%
+  group_by(temp) %>%
+  summarise(delay_count=n())
+
+flight_summary <- left_join(temp_delay,temp_total,by='temp') %>%
+  mutate(delay_percent=100*delay_count/total_count)
+
+graph4 <- flight_summary %>%
+  ggplot(aes(x=temp,y=delay_percent))+geom_smooth()+ggtitle("Average delay vs temp with density plot")+ylab("delay percent")
+graph4
+
+# wind_speed --------------------------------------------------------------
+
+wind_speed_total <- flight_with_weather %>%
+  group_by(wind_speed) %>%
+  summarise(total_count=n())
+
+wind_speed_delay <- flight_with_weather_delayed %>%
+  filter(dep_delay>0)%>%
+  group_by(wind_speed) %>%
+  summarise(delay_count=n())
+
+flight_summary <- left_join(wind_speed_delay,wind_speed_total,by='wind_speed') %>%
+  mutate(delay_percent=100*delay_count/total_count)
+
+graph5 <- flight_summary %>%
+  ggplot(aes(x=wind_speed,y=delay_percent))+geom_smooth()+ggtitle("Average delay vs windspeed with density plot")+ylab("delay percent")
+graph5
+
+
+ggarrange(graph1,graph2,graph3,graph4,graph5,
+          labels=c('A','B','C','D','E'),ncol=2,nrow=3)
+
+
+# Graph of delayed flights categorized by season and the origin airport --------------------------------------------------------
+
+graph8<-flight_with_weather_delayed %>%
+  group_by(origin,season) %>%
+  summarise(count=n())%>%
+  ggplot(aes(x=reorder(origin,-count),y=count,fill=season))+geom_bar(color='grey',stat = "identity")+
+  #geom_text(aes(label=count),nudge_y = 1000)+
+  ylab("Number of Flights")+xlab("Airports")+
+  ggtitle("delayed flights by airport and during which season")
+
+# Delayed flights categorized by weather rating and origin airport-------------------------------------------
+
+#rating of weather on a scale of 1-10 ; 1-bad and 10-good :-
+#can observe that delays of flights despite having good weather conditions is significantly high, 
+graph9<-flight_with_weather_delayed %>%
+  group_by(origin,Total_Rating) %>%
+  summarise(count=n())%>%
+  ggplot(aes(x=reorder(origin,-count),y=count,fill=Total_Rating))+geom_bar(color='grey',stat = "identity")+
+  #geom_text(aes(label=count),nudge_y = 1000)+
+  ylab("Number of Flights")+xlab("Airports")+
+  ggtitle("delayed flights by airport and during which season")
+
+ggarrange(graph8,graph9,labels=c('A','B'),ncol=2,nrow=1)
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+
+```
